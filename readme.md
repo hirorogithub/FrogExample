@@ -1,0 +1,4 @@
+- dependency :
+   - ```go get github.com/nats-io/go-nats```
+   - download the nats server```https://nats.io/download/nats-io/gnatsd/``` just for your platform 
+   - run it like ```gnatsd -p 4222 -m 8222 > log 2>&1 & ``` 

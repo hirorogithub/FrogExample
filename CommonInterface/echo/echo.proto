@@ -1,0 +1,13 @@
+syntax = "proto2";
+package echoTest;
+
+message ProtoEchoRequest
+{
+	optional string text = 1;
+}
+
+message ProtoEchoResponse
+{
+    optional string text = 1;
+}
+
