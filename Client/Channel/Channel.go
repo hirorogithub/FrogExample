@@ -2,7 +2,6 @@ package Channel
 
 import (
 	util "../../CommonInterface"
-	echo "../../CommonInterface/echo"
 	"context"
 	"encoding/json"
 	"errors"
@@ -75,52 +74,42 @@ func (this *MyChannel) Go(method *frog.MethodDesc, ctx context.Context, request 
 		nil,
 		false,
 	}
-	//var rpcMeth *frog.RpcMethod
-	//for _, meth := range MethodsTable.Methods {
-	//	if meth.Descriptor() == method {
-	//		rpcMeth = meth
-	//		break
-	//	}
-	//}
-	//if rpcMeth == nil {
-	//	call.done(errors.New("method not found"))
-	//	return call
-	//}
+
 
 	jdata, _ := json.Marshal(util.RPCCallNatsMsg{
 		Method:   method,
-		Request:  *request.(*echo.ProtoEchoRequest),
-		Response: *response.(*echo.ProtoEchoResponse),
+		Request:  request,
+		Response: response,
 	})
 
-	msg, err := this.conn.Request("frog", jdata, time.Second*5)
+	subj:=*method.GetServiceDesc().Name
+	msg, err := this.conn.Request(subj, jdata, time.Second*5)
 	if err != nil {
 		log.Println(err)
-		call.done(errors.New("request faild"))
+		call.done(err)
 		return call
 	}
 
-	res := util.RPCCallNatsMsg{}
-	err = json.Unmarshal(msg.Data, &res)
+
+	//unmarshal the args
+	args := util.RPCCallNatsMsg{}
+	err = json.Unmarshal(msg.Data, &args)
 	if err != nil {
 		log.Println(err)
-		call.done(errors.New("request faild"))
+		call.done(err)
 		return call
 	}
 
-	//should deep copy
-	//p := &(res.Response)
-	response.(*echo.ProtoEchoResponse).Text = res.Response.Text
+	//reflect to response
+	ok:=util.MapToStruct(args.Request.(map[string]interface{}),&response)
+	if !ok{
+		log.Println("map to struct fail ")
+		call.done(errors.New("map to struct fail "))
+		return call
+	}
 
 	call.done(nil)
-	// async invoke
-	//go func() {
-	//
-	//	//publish my request
-	//	time.Sleep(time.Second * 5)
-	//	err := frog.CallMethod(rpcMeth, ctx, request, response)
-	//	call.done(err)
-	//}()
+
 
 	if _, ok := ctx.Deadline(); ok {
 		go func() {

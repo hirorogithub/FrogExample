@@ -1,7 +1,6 @@
 package Service
 
 import (
-	"../../CommonInterface/MethodsTable"
 	"github.com/nats-io/go-nats"
 
 	util "../../CommonInterface"
@@ -11,9 +10,20 @@ import (
 	"github.com/golang/protobuf/proto"
 	"github.com/yplusplus/frog"
 	"log"
-	"strings"
 	"time"
 )
+
+var (
+	methodTable = make(map[string]*frog.RpcMethod)
+)
+
+func registerMethods(methods []*frog.RpcMethod) error {
+	for _, method := range methods {
+		methodTable[*(method.Descriptor().Name)] = method
+	}
+	return nil
+
+}
 
 type MyEchoServiceImpl struct {
 	conn *nats.Conn
@@ -36,7 +46,7 @@ func NewMyEchoServiceImpl() *MyEchoServiceImpl {
 	baseService := &MyEchoServiceImpl{tmpConn}
 	log.Println("Link Start!")
 
-	err = echo.RegisterEchoService(baseService, MethodsTable.RegisterMethods)
+	err = echo.RegisterEchoService(baseService, registerMethods)
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -46,42 +56,46 @@ func NewMyEchoServiceImpl() *MyEchoServiceImpl {
 }
 
 func (impl *MyEchoServiceImpl) listenRPCCall() {
-	//impl.conn.Req
-	impl.conn.Subscribe("frog", func(msg *nats.Msg) {
 
+	//registe listener by service name
+	subj := *echo.EchoService_ServiceDesc.Name
+	impl.conn.Subscribe(subj, func(msg *nats.Msg) {
+
+		//get args
 		args := util.RPCCallNatsMsg{}
-
 		err := json.Unmarshal(msg.Data, &args)
 		if err != nil {
 			log.Println(err)
 			return
 		}
 
-		//request:=args.Request.(echo.ProtoEchoRequest)
-
-		var rpcMeth *frog.RpcMethod
-		for _, meth := range MethodsTable.Methods {
-			//should deep compare
-			if strings.EqualFold(*meth.Descriptor().Name, *args.Method.Name) {
-				rpcMeth = meth
-				break
-			}
-		}
-		if rpcMeth == nil {
+		//get rpcmeth
+		rpcMeth, exist := methodTable[*(args.Method.Name)]
+		if !exist {
 			log.Println(err)
 			return
 		}
+
+		//reflect response/request to real type
+		args.Response = rpcMeth.NewResponse()
+
+		request := rpcMeth.NewRequest()
+		ok := util.MapToStruct(args.Request.(map[string]interface{}), &request)
+		if !ok {
+			log.Println("map to struct fail ")
+		}
+		args.Request = request
+
+		//call the rpc func
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
-
-		var response echo.ProtoEchoResponse
-		err = frog.CallMethod(rpcMeth, ctx, &args.Request, &response)
+		err = frog.CallMethod(rpcMeth, ctx, args.Request.(proto.Message), args.Response.(proto.Message))
 
 		if err != nil {
 			log.Println(err)
 		}
 
-		args.Response = response
+		//marshal the args and reply
 		res, err := json.Marshal(args)
 		impl.conn.Publish(msg.Reply, res)
 
