@@ -2,7 +2,7 @@ package main
 
 import ("time"
     "../Channel"
-    echo "../../CommonInterface/echo"
+    echo "../../util/echo"
     "github.com/gogo/protobuf/proto"
     "log"
     "context"

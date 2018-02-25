@@ -1,7 +1,7 @@
 package main
 
 import (
-	util "../../CommonInterface"
+	util "../"
 	"log"
 )
 

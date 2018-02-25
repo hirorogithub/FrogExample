@@ -3,14 +3,15 @@ package Service
 import (
 	"github.com/nats-io/go-nats"
 
-	util "../../CommonInterface"
-	echo "../../CommonInterface/echo"
+	util "../../util"
+	echo "../../util/echo"
 	"context"
 	"encoding/json"
 	"github.com/golang/protobuf/proto"
 	"github.com/yplusplus/frog"
 	"log"
 	"time"
+	"github.com/pkg/errors"
 )
 
 var (
@@ -55,6 +56,14 @@ func NewMyEchoServiceImpl() *MyEchoServiceImpl {
 	return baseService
 }
 
+func (impl * MyEchoServiceImpl)errReply(subj string,args util.RPCHeader,err error){
+	log.Println(err)
+	args.StatusCode = util.CallLogicErr
+	args.Msg = nil
+	impl.conn.Publish(subj,args.ToByte())
+	return
+}
+
 func (impl *MyEchoServiceImpl) listenRPCCall() {
 
 	//registe listener by service name
@@ -62,42 +71,47 @@ func (impl *MyEchoServiceImpl) listenRPCCall() {
 	impl.conn.Subscribe(subj, func(msg *nats.Msg) {
 
 		//get args
-		args := util.RPCCallNatsMsg{}
+		args := util.RPCHeader{}
 		err := json.Unmarshal(msg.Data, &args)
 		if err != nil {
-			log.Println(err)
+			impl.errReply(msg.Reply,args,err)
 			return
 		}
 
 		//get rpcmeth
-		rpcMeth, exist := methodTable[*(args.Method.Name)]
+		rpcMeth, exist := methodTable[(args.MethodName)]
 		if !exist {
-			log.Println(err)
+			impl.errReply(msg.Reply,args,err)
 			return
 		}
 
+
 		//reflect response/request to real type
-		args.Response = rpcMeth.NewResponse()
-
+		response := rpcMeth.NewResponse()
 		request := rpcMeth.NewRequest()
-		ok := util.MapToStruct(args.Request.(map[string]interface{}), &request)
-		if !ok {
-			log.Println("map to struct fail ")
+		if !args.GetAsRequest(request){
+			impl.errReply(msg.Reply,args,errors.New("reflect to request faild"))
+			return
 		}
-		args.Request = request
 
-		//call the rpc func
+		log.Printf("Request \t%s: %+v",rpcMeth.Name(),request)
+
+		//!!here I want to pass ctx as nil,but some panic happend
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
-		err = frog.CallMethod(rpcMeth, ctx, args.Request.(proto.Message), args.Response.(proto.Message))
-
+		err = frog.CallMethod(rpcMeth, ctx, request, response)
 		if err != nil {
-			log.Println(err)
+			impl.errReply(msg.Reply,args,err)
+			return
 		}
 
-		//marshal the args and reply
-		res, err := json.Marshal(args)
+		args.SetMsg(response)
+		args.StatusCode= util.CallOK
+		res, _ := json.Marshal(args)
 		impl.conn.Publish(msg.Reply, res)
+
+		log.Printf("Response\t%s: %+v",rpcMeth.Name(),response)
+
 
 	})
 }

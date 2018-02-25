@@ -1,4 +1,4 @@
-package CommonInterface
+package util
 
 import "encoding/json"
 
